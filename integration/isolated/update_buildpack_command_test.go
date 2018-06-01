@@ -24,7 +24,7 @@ var _ = Describe("update-buildpack command", func() {
 
 	Context("when the buildpack's path does not exist", func() {
 		It("returns a buildpack does not exist error", func() {
-			session := CF("update-buildpack", "some-buildpack", "-p", "this-is-a-bogus-path")
+			session := CF("update-buildpack", "integration-buildpack-update-bogus", "-p", "this-is-a-bogus-path")
 
 			Eventually(session.Err).Should(Say("Incorrect Usage: The specified path 'this-is-a-bogus-path' does not exist."))
 			Eventually(session).Should(Exit(1))
@@ -33,39 +33,39 @@ var _ = Describe("update-buildpack command", func() {
 
 	Context("when the wrong data type is provided as the position argument", func() {
 		It("outputs an error message to the user, provides help text, and exits 1", func() {
-			session := CF("update-buildpack", "some-buildpack", "-i", "not-an-integer")
+			session := CF("update-buildpack", "integration-buildpack-not-an-integer", "-i", "not-an-integer")
 			Eventually(session.Err).Should(Say("Incorrect Usage: invalid argument for flag `-i' \\(expected int\\)"))
 			Eventually(session).Should(Say("cf update-buildpack BUILDPACK")) // help
 			Eventually(session).Should(Exit(1))
 		})
 	})
 
-	Context("when the stack is specified to disambiguate multiple buildpacks with the same name", func() {
-		var dir string
-
+	Context("when multiple buildpacks have the same name", func() {
+		var buildpackName string
 		BeforeEach(func() {
 			LoginCF()
 
-			var err error
-			dir, err = ioutil.TempDir("", "update-buildpack-test")
-			Expect(err).ToNot(HaveOccurred())
+			buildpackName = "integration-buildpack-multiple"
+			session := CF("create-buildpack", buildpackName, "../assets/test_buildpacks/simple_buildpack-cflinuxfs2-v1.0.0.zip", "1")
+			Eventually(session).Should(Exit(0))
 
-			filename := "manifest.yml"
-			manifestFile := filepath.Join(dir, filename)
-			err = ioutil.WriteFile(manifestFile, []byte("---\nstack:cflinuxfs2"), 0400)
-			Expect(err).ToNot(HaveOccurred())
-
-			session := CF("create-buildpack", "some-buildpack", dir, "1")
+			session = CF("create-buildpack", buildpackName, "../assets/test_buildpacks/simple_buildpack-windows2012R2-v1.0.0.zip", "1")
 			Eventually(session).Should(Exit(0))
 		})
 
-		AfterEach(func() {
-			Eventually(CF("delete-buildpack", "some-buildpack", "-f")).Should(Exit(0))
-			Expect(os.RemoveAll(dir)).To(Succeed())
-		})
+		It("handles ambiguity properly", func() {
+			By("failing when no stack is specified")
+			session := CF("update-buildpack", buildpackName, "-i", "999")
+			Eventually(session).Should(Exit(1))
+			Eventually(session.Out).Should(Say("FAILED"))
 
-		It("accepts stack argument and updates the buildpack", func() {
-			session := CF("update-buildpack", "some-buildpack", "-s", "cflinuxfs2", "-i", "999")
+			By("failing when the manifest for the buildpack specifies a different stack")
+			session = CF("update-buildpack", buildpackName, "-i", "999", "-s", "cflinuxfs2", "-p", "../assets/test_buildpacks/simple_buildpack-windows2012R2-v1.0.0.zip")
+			Eventually(session).Should(Exit(1))
+			Eventually(session.Out).Should(Say("FAILED"))
+
+			By("updating when a stack associated with that buildpack name is specified")
+			session = CF("update-buildpack", buildpackName, "-s", "cflinuxfs2", "-i", "999")
 			Eventually(session).Should(Exit(0))
 			Eventually(session.Out).Should(Say("OK"))
 			Expect(session.Err).NotTo(Say("Incorrect Usage:"))
@@ -73,7 +73,10 @@ var _ = Describe("update-buildpack command", func() {
 	})
 
 	Context("when a URL is provided as the buildpack", func() {
-		var dir string
+		var (
+			dir           string
+			buildpackName string
+		)
 
 		BeforeEach(func() {
 			LoginCF()
@@ -87,17 +90,17 @@ var _ = Describe("update-buildpack command", func() {
 			err = ioutil.WriteFile(tempfile, []byte{}, 0400)
 			Expect(err).ToNot(HaveOccurred())
 
-			session := CF("create-buildpack", "some-buildpack", dir, "1")
+			buildpackName = "integration-buildpack-url"
+			session := CF("create-buildpack", buildpackName, dir, "1")
 			Eventually(session).Should(Exit(0))
 		})
 
 		AfterEach(func() {
-			Eventually(CF("delete-buildpack", "some-buildpack", "-f")).Should(Exit(0))
 			Expect(os.RemoveAll(dir)).To(Succeed())
 		})
 
 		It("outputs an error message to the user, provides help text, and exits 1", func() {
-			session := CF("update-buildpack", "some-buildpack", "-p", "https://example.com/bogus.tgz")
+			session := CF("update-buildpack", buildpackName, "-p", "https://example.com/bogus.tgz")
 			Eventually(session).Should(Say("Failed to create a local temporary zip file for the buildpack"))
 			Eventually(session).Should(Say("FAILED"))
 			Eventually(session).Should(Say("Couldn't write zip file: zip: not a valid zip file"))
